@@ -1,0 +1,1578 @@
+diff --git a/main/gcc/APKBUILD b/main/gcc/APKBUILD
+index fe52d00a..bd53d395 100644
+--- a/main/gcc/APKBUILD
++++ b/main/gcc/APKBUILD
+@@ -19,12 +19,12 @@ subpackages=" "
+ [ "$CHOST" = "$CTARGET" ] && subpackages="gcc-doc$_target"
+ replaces="libstdc++ binutils"
+ 
+-: "${LANG_CXX:=true}"
+-: "${LANG_D:=true}"
+-: "${LANG_OBJC:=true}"
+-: "${LANG_GO:=true}"
++: "${LANG_CXX:=false}"
++: "${LANG_D:=false}"
++: "${LANG_OBJC:=false}"
++: "${LANG_GO:=false}"
+ : "${LANG_FORTRAN:=true}"
+-: "${LANG_ADA:=true}"
++: "${LANG_ADA:=false}"
+ 
+ _libgomp=true
+ _libgcc=true
+@@ -192,6 +192,7 @@ source="https://gcc.gnu.org/pub/gcc/releases/gcc-${_pkgbase:-$pkgver}/gcc-${_pkg
+ 	404-dlang-zlib.patch
+ 	405-dlang-mips.patch
+ 	406-dlang-fix-interface-visibility.patch
++	pr87939.patch
+ 	"
+ 
+ #	gcc-4.8-build-args.patch
+@@ -646,4 +647,5 @@ f4ef08454e28c8732db69115e4998ec153399e8d229dd27f923dbdcf57b68128a65640d026cc7f45
+ fd056014d0c6f627108d7387bfe46b5fb66786a16fa964da55b0442658b1c8e9e903c641a9e3233000ef37691e32ea4fef22029ab5eba217ccbc8bd5941e81ae  403-dlang-ibmz.patch
+ ddb3ca26b5e55f6d376036c2ed87959770bfb72d1175d0dba332f705edf6817806d53765c838ff670472a16ab175bd1ce88946c19d83f9d5e53ff2b4d3558dfb  404-dlang-zlib.patch
+ 3f40f796f50d49ea0a185d3454c79606fb5f90ed48c030fe25c1df8c4a72ba7cae37dccdb260cf737beb3e921dc2ddad68effbe446dbf220a07d0158b9b9ca8d  405-dlang-mips.patch
+-c226bb5c60ae5071549e5ec3ab44dc87b244615ba520973b1d4c50a2b6d3fd941c4e5e8e1f85cad28093ee8627d20415114524b593ad3a9b24998328d3f3ea72  406-dlang-fix-interface-visibility.patch"
++c226bb5c60ae5071549e5ec3ab44dc87b244615ba520973b1d4c50a2b6d3fd941c4e5e8e1f85cad28093ee8627d20415114524b593ad3a9b24998328d3f3ea72  406-dlang-fix-interface-visibility.patch
++dc6d443450cbcb34f12d114884e640cd8faa6956bb162a80dfe0b58fcba36341a2076d8b3a9c978de0430ac005f005a44e9228128e3f59bdb90e608fce744489  pr87939.patch"
+diff --git a/main/gcc/pr87939.patch b/main/gcc/pr87939.patch
+new file mode 100644
+index 00000000..56d0449c
+--- /dev/null
++++ b/main/gcc/pr87939.patch
+@@ -0,0 +1,1535 @@
++diff --git a/gcc/fortran/gfortran.h b/gcc/fortran/gfortran.h
++index d7071ae5fcf..4e3c0a9af01 100644
++--- a/gcc/fortran/gfortran.h
+++++ b/gcc/fortran/gfortran.h
++@@ -2600,7 +2600,7 @@ typedef struct gfc_code
++ 
++   gfc_st_label *here, *label1, *label2, *label3;
++   gfc_symtree *symtree;
++-  gfc_expr *expr1, *expr2, *expr3, *expr4;
+++  gfc_expr *expr1, *expr2, *expr3, *expr4, *expr5;
++   /* A name isn't sufficient to identify a subroutine, we need the actual
++      symbol for the interface definition.
++   const char *sub_name;  */
++diff --git a/gcc/fortran/libgfortran.h b/gcc/fortran/libgfortran.h
++index 581b2f529db..5fc8df67230 100644
++--- a/gcc/fortran/libgfortran.h
+++++ b/gcc/fortran/libgfortran.h
++@@ -133,7 +133,8 @@ typedef enum
++   GFC_STAT_LOCKED,
++   GFC_STAT_LOCKED_OTHER_IMAGE,
++   GFC_STAT_STOPPED_IMAGE = 6000, /* See LIBERROR_INQUIRE_INTERNAL_UNIT above. */
++-  GFC_STAT_FAILED_IMAGE  = 6001
+++  GFC_STAT_FAILED_IMAGE  = 6001,
+++  GFC_STAT_UNLOCKED_FAILED_IMAGE = 6002
++ }
++ libgfortran_stat_codes;
++ 
++diff --git a/gcc/fortran/match.c b/gcc/fortran/match.c
++index 088b69f8ec9..5398debfe76 100644
++--- a/gcc/fortran/match.c
+++++ b/gcc/fortran/match.c
++@@ -1795,6 +1795,12 @@ match
++ gfc_match_critical (void)
++ {
++   gfc_st_label *label = NULL;
+++  match m;
+++  gfc_expr *tmp, *stat, *errmsg;
+++  bool saw_stat, saw_errmsg;
+++
+++  tmp = stat = errmsg = NULL;
+++  saw_stat = saw_errmsg = false;
++ 
++   if (gfc_match_label () == MATCH_ERROR)
++     return MATCH_ERROR;
++@@ -1805,12 +1811,62 @@ gfc_match_critical (void)
++   if (gfc_match_st_label (&label) == MATCH_ERROR)
++     return MATCH_ERROR;
++ 
++-  if (gfc_match_eos () != MATCH_YES)
+++  if (gfc_match_eos () == MATCH_YES)
+++    goto done;
+++
+++  if (gfc_match_char ('(') != MATCH_YES)
+++    goto syntax;
+++
+++  for (;;)
++     {
++-      gfc_syntax_error (ST_CRITICAL);
++-      return MATCH_ERROR;
+++      m = gfc_match (" stat = %v", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_stat)
+++	    {
+++	      gfc_error ("Redundant STAT tag found at %L", &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  stat = tmp;
+++	  saw_stat = true;
+++
+++	  if (gfc_match_char (',') == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++      m = gfc_match (" errmsg = %v", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_errmsg)
+++	    {
+++	      gfc_error ("Redundant ERRMSG tag found at %L", &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  errmsg = tmp;
+++	  saw_errmsg = true;
+++
+++	  if (gfc_match_char (',') == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++	break;
++     }
++ 
+++  if (gfc_match (" )%t") != MATCH_YES)
+++    goto syntax;
+++
+++done:
+++
++   if (gfc_pure (NULL))
++     {
++       gfc_error ("Image control statement CRITICAL at %C in PURE procedure");
++@@ -1843,12 +1899,27 @@ gfc_match_critical (void)
++     }
++ 
++   new_st.op = EXEC_CRITICAL;
+++  new_st.expr1 = stat;
+++  new_st.expr2 = errmsg;
++ 
++   if (label != NULL
++       && !gfc_reference_st_label (label, ST_LABEL_TARGET))
++-    return MATCH_ERROR;
+++    goto cleanup;
++ 
++   return MATCH_YES;
+++
+++syntax:
+++  gfc_syntax_error (ST_CRITICAL);
+++
+++cleanup:
+++  if (stat != tmp)
+++    gfc_free_expr (stat);
+++  if (errmsg != tmp)
+++    gfc_free_expr (errmsg);
+++
+++  gfc_free_expr (tmp);
+++
+++  return MATCH_ERROR;
++ }
++ 
++ 
++@@ -3395,7 +3466,11 @@ match
++ gfc_match_form_team (void)
++ {
++   match m;
++-  gfc_expr *teamid,*team;
+++  gfc_expr *teamid, *team, *new_index, *stat, *errmsg, *tmp;
+++  bool saw_new_index, saw_stat, saw_errmsg;
+++
+++  team = new_index = stat = errmsg = tmp = NULL;
+++  saw_new_index = saw_stat = saw_errmsg = false;
++ 
++   if (!gfc_notify_std (GFC_STD_F2018, "FORM TEAM statement at %C"))
++     return MATCH_ERROR;
++@@ -3413,18 +3488,117 @@ gfc_match_form_team (void)
++   if (gfc_match ("%e", &team) != MATCH_YES)
++     goto syntax;
++ 
++-  m = gfc_match_char (')');
+++  m = gfc_match_char (',');
+++  if (m == MATCH_ERROR)
+++    goto syntax;
++   if (m == MATCH_NO)
+++    {
+++      m = gfc_match_char (')');
+++      if (m == MATCH_YES)
+++	goto done;
+++      goto syntax;
+++    }
+++
+++  for (;;)
+++    {
+++      m = gfc_match (" stat = %v", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_stat)
+++	    {
+++	      gfc_error ("Redundant STAT tag found at %L", &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  stat = tmp;
+++	  saw_stat = true;
+++
+++	  m = gfc_match_char (',');
+++	  if (m == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++      m = gfc_match (" errmsg = %v", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_errmsg)
+++	    {
+++	      gfc_error ("Redundant ERRMSG tag found at %L", &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  errmsg = tmp;
+++	  saw_errmsg = true;
+++
+++	  m = gfc_match_char (',');
+++	  if (m == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++      m = gfc_match (" new_index = %e", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_new_index)
+++	    {
+++	      gfc_error ("Redundant NEW_INDEX tag found at %L",
+++			 &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  new_index = tmp;
+++	  saw_new_index = true;
+++
+++	  m = gfc_match_char (',');
+++	  if (m == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++      break;
+++    }
+++
+++  if (m == MATCH_ERROR)
+++    goto syntax;
+++
+++  if (gfc_match (" )%t") != MATCH_YES)
++     goto syntax;
++ 
+++done:
+++
++   new_st.expr1 = teamid;
++   new_st.expr2 = team;
+++  new_st.expr3 = new_index;
+++  new_st.expr4 = stat;
+++  new_st.expr5 = errmsg;
++ 
++   return MATCH_YES;
++ 
++ syntax:
++   gfc_syntax_error (ST_FORM_TEAM);
++ 
+++cleanup:
+++  if (new_index != tmp)
+++    gfc_free_expr (new_index);
+++  if (stat != tmp)
+++    gfc_free_expr (stat);
+++  if (errmsg != tmp)
+++    gfc_free_expr (errmsg);
+++
+++  gfc_free_expr (tmp);
+++  gfc_free_expr (team);
+++  gfc_free_expr (teamid);
+++
++   return MATCH_ERROR;
++ }
++ 
++@@ -3434,7 +3608,11 @@ match
++ gfc_match_change_team (void)
++ {
++   match m;
++-  gfc_expr *team;
+++  gfc_expr *team, *stat, *errmsg, *tmp;
+++  bool saw_stat, saw_errmsg;
+++
+++  tmp = team = stat = errmsg = NULL;
+++  saw_stat = saw_errmsg = false;
++ 
++   if (!gfc_notify_std (GFC_STD_F2018, "CHANGE TEAM statement at %C"))
++     return MATCH_ERROR;
++@@ -3447,17 +3625,85 @@ gfc_match_change_team (void)
++   if (gfc_match ("%e", &team) != MATCH_YES)
++     goto syntax;
++ 
++-  m = gfc_match_char (')');
+++  m = gfc_match_char (',');
+++  if (m == MATCH_ERROR)
+++    goto syntax;
++   if (m == MATCH_NO)
+++    {
+++      m = gfc_match_char (')');
+++      if (m == MATCH_YES)
+++	goto done;
+++      goto syntax;
+++    }
+++
+++  for (;;)
+++    {
+++      m = gfc_match (" stat = %v", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_stat)
+++	    {
+++	      gfc_error ("Redundant STAT tag found at %L", &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  stat = tmp;
+++	  saw_stat = true;
+++
+++	  if (gfc_match_char (',') == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++      m = gfc_match (" errmsg = %v", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_errmsg)
+++	    {
+++	      gfc_error ("Redundant ERRMSG tag found at %L", &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  errmsg = tmp;
+++	  saw_errmsg = true;
+++
+++	  if (gfc_match_char (',') == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++	break;
+++    }
+++
+++  if (gfc_match (" )%t") != MATCH_YES)
++     goto syntax;
++ 
+++done:
+++
++   new_st.expr1 = team;
+++  new_st.expr2 = stat;
+++  new_st.expr3 = errmsg;
++ 
++   return MATCH_YES;
++ 
++ syntax:
++   gfc_syntax_error (ST_CHANGE_TEAM);
++ 
+++cleanup:
+++  if (stat != tmp)
+++    gfc_free_expr (stat);
+++  if (errmsg != tmp)
+++    gfc_free_expr (errmsg);
+++
+++  gfc_free_expr (tmp);
+++  gfc_free_expr (team);
+++
++   return MATCH_ERROR;
++ }
++ 
++@@ -3466,19 +3712,89 @@ syntax:
++ match
++ gfc_match_end_team (void)
++ {
+++  match m;
+++  gfc_expr *tmp, *stat, *errmsg;
+++  bool saw_stat, saw_errmsg;
+++
+++  tmp = stat = errmsg = NULL;
+++  saw_stat = saw_errmsg = false;
+++
++   if (!gfc_notify_std (GFC_STD_F2018, "END TEAM statement at %C"))
++     return MATCH_ERROR;
++ 
++-  if (gfc_match_char ('(') == MATCH_YES)
+++  if (gfc_match_eos () == MATCH_YES)
+++    goto done;
+++
+++  if (gfc_match_char ('(') != MATCH_YES)
+++    goto syntax;
+++
+++  for (;;)
+++    {
+++      m = gfc_match (" stat = %v", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_stat)
+++	    {
+++	      gfc_error ("Redundant STAT tag found at %L", &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  stat = tmp;
+++	  saw_stat = true;
+++
+++	  if (gfc_match_char (',') == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++      m = gfc_match (" errmsg = %v", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_errmsg)
+++	    {
+++	      gfc_error ("Redundant ERRMSG tag found at %L", &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  errmsg = tmp;
+++	  saw_errmsg = true;
+++
+++	  if (gfc_match_char (',') == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++	break;
+++    }
+++
+++  if (gfc_match (" )%t") != MATCH_YES)
++     goto syntax;
++ 
+++done:
+++
++   new_st.op = EXEC_END_TEAM;
+++  new_st.expr1 = stat;
+++  new_st.expr2 = errmsg;
++ 
++   return MATCH_YES;
++ 
++ syntax:
++   gfc_syntax_error (ST_END_TEAM);
++ 
+++cleanup:
+++  if (stat != tmp)
+++    gfc_free_expr (stat);
+++  if (errmsg != tmp)
+++    gfc_free_expr (errmsg);
+++
+++  gfc_free_expr (tmp);
+++
++   return MATCH_ERROR;
++ }
++ 
++@@ -3488,7 +3804,11 @@ match
++ gfc_match_sync_team (void)
++ {
++   match m;
++-  gfc_expr *team;
+++  gfc_expr *team, *stat, *errmsg, *tmp;
+++  bool saw_stat, saw_errmsg;
+++
+++  tmp = team = stat = errmsg = NULL;
+++  saw_stat = saw_errmsg = false;
++ 
++   if (!gfc_notify_std (GFC_STD_F2018, "SYNC TEAM statement at %C"))
++     return MATCH_ERROR;
++@@ -3501,17 +3821,85 @@ gfc_match_sync_team (void)
++   if (gfc_match ("%e", &team) != MATCH_YES)
++     goto syntax;
++ 
++-  m = gfc_match_char (')');
+++  m = gfc_match_char (',');
+++  if (m == MATCH_ERROR)
+++    goto syntax;
++   if (m == MATCH_NO)
+++    {
+++      m = gfc_match_char (')');
+++      if (m == MATCH_YES)
+++	goto done;
+++      goto syntax;
+++    }
+++
+++  for (;;)
+++    {
+++      m = gfc_match (" stat = %v", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_stat)
+++	    {
+++	      gfc_error ("Redundant STAT tag found at %L", &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  stat = tmp;
+++	  saw_stat = true;
+++
+++	  if (gfc_match_char (',') == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++      m = gfc_match (" errmsg = %v", &tmp);
+++      if (m == MATCH_ERROR)
+++	goto syntax;
+++      if (m == MATCH_YES)
+++	{
+++	  if (saw_errmsg)
+++	    {
+++	      gfc_error ("Redundant ERRMSG tag found at %L", &tmp->where);
+++	      goto cleanup;
+++	    }
+++	  errmsg = tmp;
+++	  saw_errmsg = true;
+++
+++	  if (gfc_match_char (',') == MATCH_YES)
+++	    continue;
+++
+++	  tmp = NULL;
+++	  break;
+++	}
+++
+++	break;
+++    }
+++
+++  if (gfc_match (" )%t") != MATCH_YES)
++     goto syntax;
++ 
+++done:
+++
++   new_st.expr1 = team;
+++  new_st.expr2 = stat;
+++  new_st.expr3 = errmsg;
++ 
++   return MATCH_YES;
++ 
++ syntax:
++   gfc_syntax_error (ST_SYNC_TEAM);
++ 
+++cleanup:
+++  if (stat != tmp)
+++    gfc_free_expr (stat);
+++  if (errmsg != tmp)
+++    gfc_free_expr (errmsg);
+++
+++  gfc_free_expr (tmp);
+++  gfc_free_expr (team);
+++
++   return MATCH_ERROR;
++ }
++ 
++diff --git a/gcc/fortran/resolve.c b/gcc/fortran/resolve.c
++index a4ad26efffc..764dcc7e470 100644
++--- a/gcc/fortran/resolve.c
+++++ b/gcc/fortran/resolve.c
++@@ -9727,6 +9727,89 @@ resolve_lock_unlock_event (gfc_code *code)
++     }
++ }
++ 
+++static void
+++resolve_form_team (gfc_code *code)
+++{
+++  if (code->expr2->ts.type != BT_DERIVED
+++	  || code->expr2->expr_type != EXPR_VARIABLE
+++	  || code->expr2->ts.u.derived->from_intmod != INTMOD_ISO_FORTRAN_ENV
+++	  || code->expr2->ts.u.derived->intmod_sym_id != ISOFORTRAN_TEAM_TYPE
+++	  || code->expr2->rank != 0)
+++    gfc_error ("Team variable at %L must be a scalar of type TEAM_TYPE",
+++	       &code->expr2->where);
+++
+++  /* Check NEW_INDEX.  */
+++  if (code->expr3)
+++    {
+++      if (!gfc_resolve_expr (code->expr3) || code->expr3->ts.type != BT_INTEGER
+++	  || code->expr3->rank != 0)
+++	gfc_error ("NEW_INDEX= argument at %L must be a scalar INTEGER "
+++		   "expression", &code->expr3->where);
+++    }
+++
+++  /* Check STAT.  */
+++  gfc_resolve_expr (code->expr4);
+++  if (code->expr4
+++      && (code->expr4->ts.type != BT_INTEGER || code->expr4->rank != 0
+++	  || code->expr4->expr_type != EXPR_VARIABLE))
+++    gfc_error ("STAT= argument at %L must be a scalar INTEGER variable",
+++	       &code->expr4->where);
+++
+++  /* Check ERRMSG.  */
+++  gfc_resolve_expr (code->expr5);
+++  if (code->expr5
+++      && (code->expr5->ts.type != BT_CHARACTER || code->expr5->rank != 0
+++	  || code->expr5->expr_type != EXPR_VARIABLE))
+++    gfc_error ("ERRMSG= argument at %L must be a scalar CHARACTER variable",
+++	       &code->expr5->where);
+++}
+++
+++static void
+++resolve_change_sync_team (gfc_code *code)
+++{
+++  if (code->expr1->ts.type != BT_DERIVED
+++	  || code->expr1->ts.u.derived->from_intmod != INTMOD_ISO_FORTRAN_ENV
+++	  || code->expr1->ts.u.derived->intmod_sym_id != ISOFORTRAN_TEAM_TYPE
+++	  || code->expr1->rank != 0)
+++    gfc_error ("team-value argument at %L must be a scalar TEAM_TYPE expression",
+++	       &code->expr1->where);
+++
+++  /* Check STAT.  */
+++  gfc_resolve_expr (code->expr2);
+++  if (code->expr2
+++      && (code->expr2->ts.type != BT_INTEGER || code->expr2->rank != 0
+++	  || code->expr2->expr_type != EXPR_VARIABLE))
+++    gfc_error ("STAT= argument at %L must be a scalar INTEGER variable",
+++	       &code->expr2->where);
+++
+++  /* Check ERRMSG.  */
+++  gfc_resolve_expr (code->expr3);
+++  if (code->expr3
+++      && (code->expr3->ts.type != BT_CHARACTER || code->expr3->rank != 0
+++	  || code->expr3->expr_type != EXPR_VARIABLE))
+++    gfc_error ("ERRMSG= argument at %L must be a scalar CHARACTER variable",
+++	       &code->expr3->where);
+++}
+++
+++static void
+++resolve_end_team (gfc_code *code)
+++{
+++  /* Check STAT.  */
+++  gfc_resolve_expr (code->expr1);
+++  if (code->expr1
+++      && (code->expr1->ts.type != BT_INTEGER || code->expr1->rank != 0
+++	  || code->expr1->expr_type != EXPR_VARIABLE))
+++    gfc_error ("STAT= argument at %L must be a scalar INTEGER variable",
+++	       &code->expr1->where);
+++
+++  /* Check ERRMSG.  */
+++  gfc_resolve_expr (code->expr2);
+++  if (code->expr2
+++      && (code->expr2->ts.type != BT_CHARACTER || code->expr2->rank != 0
+++	  || code->expr2->expr_type != EXPR_VARIABLE))
+++    gfc_error ("ERRMSG= argument at %L must be a scalar CHARACTER variable",
+++	       &code->expr2->where);
+++}
++ 
++ static void
++ resolve_critical (gfc_code *code)
++@@ -9736,6 +9819,22 @@ resolve_critical (gfc_code *code)
++   char name[GFC_MAX_SYMBOL_LEN];
++   static int serial = 0;
++ 
+++  /* Check STAT.  */
+++  gfc_resolve_expr (code->expr1);
+++  if (code->expr1
+++      && (code->expr1->ts.type != BT_INTEGER || code->expr1->rank != 0
+++	  || code->expr1->expr_type != EXPR_VARIABLE))
+++    gfc_error ("STAT= argument at %L must be a scalar INTEGER variable",
+++	       &code->expr1->where);
+++
+++  /* Check ERRMSG.  */
+++  gfc_resolve_expr (code->expr2);
+++  if (code->expr2
+++      && (code->expr2->ts.type != BT_CHARACTER || code->expr2->rank != 0
+++	  || code->expr2->expr_type != EXPR_VARIABLE))
+++    gfc_error ("ERRMSG= argument at %L must be a scalar CHARACTER variable",
+++	       &code->expr2->where);
+++
++   if (flag_coarray != GFC_FCOARRAY_LIB)
++     return;
++ 
++@@ -11431,10 +11530,18 @@ start:
++ 	  break;
++ 
++ 	case EXEC_FAIL_IMAGE:
+++      break;
++ 	case EXEC_FORM_TEAM:
+++      resolve_form_team (code);
+++      break;
+++
++ 	case EXEC_CHANGE_TEAM:
++-	case EXEC_END_TEAM:
++ 	case EXEC_SYNC_TEAM:
+++      resolve_change_sync_team (code);
+++      break;
+++
+++	case EXEC_END_TEAM:
+++      resolve_end_team (code);
++ 	  break;
++ 
++ 	case EXEC_ENTRY:
++diff --git a/gcc/fortran/trans-decl.c b/gcc/fortran/trans-decl.c
++index 71f751de76f..ec57e14c8e2 100644
++--- a/gcc/fortran/trans-decl.c
+++++ b/gcc/fortran/trans-decl.c
++@@ -3899,19 +3899,20 @@ gfc_build_builtin_function_decls (void)
++ 
++       gfor_fndecl_caf_form_team
++ 	= gfc_build_library_function_decl_with_spec (
++-	    get_identifier (PREFIX("caf_form_team")), "RWR",
++-	    void_type_node, 3, integer_type_node, ppvoid_type_node,
++-	    integer_type_node);
+++	    get_identifier (PREFIX("caf_form_team")), "RWRWWW",
+++	    void_type_node, 6, integer_type_node, ppvoid_type_node,
+++	    integer_type_node, pint_type, pchar_type_node, size_type_node);
++ 
++       gfor_fndecl_caf_change_team
++ 	= gfc_build_library_function_decl_with_spec (
++-	    get_identifier (PREFIX("caf_change_team")), "RR",
++-	    void_type_node, 2, ppvoid_type_node,
++-	    integer_type_node);
+++	    get_identifier (PREFIX("caf_change_team")), "RWWW",
+++	    void_type_node, 4, ppvoid_type_node, pint_type, pchar_type_node,
+++	    size_type_node);
++ 
++       gfor_fndecl_caf_end_team
++-	= gfc_build_library_function_decl (
++-	    get_identifier (PREFIX("caf_end_team")), void_type_node, 0);
+++	= gfc_build_library_function_decl_with_spec (
+++	    get_identifier (PREFIX("caf_end_team")), "WWW", void_type_node, 3,
+++	    pint_type, pchar_type_node, size_type_node);
++ 
++       gfor_fndecl_caf_get_team
++ 	= gfc_build_library_function_decl_with_spec (
++@@ -3920,9 +3921,9 @@ gfc_build_builtin_function_decls (void)
++ 
++       gfor_fndecl_caf_sync_team
++ 	= gfc_build_library_function_decl_with_spec (
++-	    get_identifier (PREFIX("caf_sync_team")), "RR",
++-	    void_type_node, 2, ppvoid_type_node,
++-	    integer_type_node);
+++	    get_identifier (PREFIX("caf_sync_team")), "RWWW",
+++	    void_type_node, 4, ppvoid_type_node, pint_type, pchar_type_node,
+++	    size_type_node);
++ 
++       gfor_fndecl_caf_team_number
++       	= gfc_build_library_function_decl_with_spec (
++diff --git a/gcc/fortran/trans-stmt.c b/gcc/fortran/trans-stmt.c
++index b839d6c73e1..99d9d8c7e81 100644
++--- a/gcc/fortran/trans-stmt.c
+++++ b/gcc/fortran/trans-stmt.c
++@@ -708,8 +708,9 @@ gfc_trans_form_team (gfc_code *code)
++   if (flag_coarray == GFC_FCOARRAY_LIB)
++     {
++       gfc_se se;
++-      gfc_se argse1, argse2;
++-      tree team_id, team_type, tmp;
+++      gfc_se argse1, argse2, argse, new_indexse;
+++      tree team_id, team_type, new_index, stat, errmsg, errmsg_len, tmp;
+++      tree stat2 = NULL_TREE;
++ 
++       gfc_init_se (&se, NULL);
++       gfc_init_se (&argse1, NULL);
++@@ -723,13 +724,64 @@ gfc_trans_form_team (gfc_code *code)
++ 
++       gfc_add_block_to_block (&se.pre, &argse1.pre);
++       gfc_add_block_to_block (&se.pre, &argse2.pre);
+++
+++      /* NEW_INDEX=.  */
+++      if (code->expr3)
+++	{
+++	  gfc_init_se (&new_indexse, NULL);
+++	  gfc_conv_expr_val (&new_indexse, code->expr3);
+++	  new_index = new_indexse.expr;
+++	}
+++      else
+++	new_index = null_pointer_node;
+++
+++      /* STAT=.  */
+++      if (code->expr4)
+++	{
+++	  gcc_assert (code->expr4->expr_type == EXPR_VARIABLE);
+++	  gfc_init_se (&argse, NULL);
+++	  gfc_conv_expr_val (&argse, code->expr4);
+++	  stat = argse.expr;
+++	}
+++      else
+++	stat = null_pointer_node;
+++
+++      /* ERRMSG= only makes sense with STAT=.  */
+++      if (code->expr4 && code->expr5)
+++	{
+++	  gfc_init_se (&argse, NULL);
+++	  argse.want_pointer = 1;
+++	  gfc_conv_expr (&argse, code->expr5);
+++	  gfc_add_block_to_block (&se.pre, &argse.pre);
+++	  errmsg = argse.expr;
+++	  errmsg_len = fold_convert (size_type_node, argse.string_length);
+++	}
+++      else
+++	{
+++	  errmsg = null_pointer_node;
+++	  errmsg_len = build_zero_cst (size_type_node);
+++	}
+++
+++      if (stat != null_pointer_node && TREE_TYPE (stat) != integer_type_node)
+++	{
+++	  stat2 = stat;
+++	  stat = gfc_create_var (integer_type_node, "stat");
+++	}
+++
++       tmp = build_call_expr_loc (input_location,
++-				 gfor_fndecl_caf_form_team, 3,
++-				 team_id, team_type,
++-				 build_int_cst (integer_type_node, 0));
+++				 gfor_fndecl_caf_form_team, 6,
+++				 team_id, team_type, new_index,
+++				 stat != null_pointer_node
+++				 ? gfc_build_addr_expr (NULL, stat) : stat,
+++				 errmsg, errmsg_len);
++       gfc_add_expr_to_block (&se.pre, tmp);
++       gfc_add_block_to_block (&se.pre, &argse1.post);
++       gfc_add_block_to_block (&se.pre, &argse2.post);
+++      if (new_index != null_pointer_node)
+++	gfc_add_block_to_block (&se.pre, &new_indexse.post);
+++      if (stat2 != NULL_TREE)
+++	gfc_add_modify (&se.pre, stat2,
+++			fold_convert (TREE_TYPE (stat2), stat));
++       return gfc_finish_block (&se.pre);
++     }
++   else
++@@ -748,19 +800,63 @@ gfc_trans_change_team (gfc_code *code)
++ {
++   if (flag_coarray == GFC_FCOARRAY_LIB)
++     {
++-      gfc_se argse;
++-      tree team_type, tmp;
+++      gfc_se argse, se, team_typese;
+++      tree team_type, stat, errmsg, errmsg_len, tmp, stat2 = NULL_TREE;
++ 
+++      gfc_init_se (&se, NULL);
++       gfc_init_se (&argse, NULL);
++-      gfc_conv_expr_val (&argse, code->expr1);
++-      team_type = gfc_build_addr_expr (ppvoid_type_node, argse.expr);
+++      gfc_init_se (&team_typese, NULL);
+++      gfc_start_block (&se.pre);
+++
+++      gfc_conv_expr_val (&team_typese, code->expr1);
+++      team_type = gfc_build_addr_expr (ppvoid_type_node, team_typese.expr);
+++
+++      gfc_add_block_to_block (&se.pre, &team_typese.pre);
+++
+++      /* STAT=.  */
+++      if (code->expr2)
+++	{
+++	  gcc_assert (code->expr2->expr_type == EXPR_VARIABLE);
+++	  gfc_init_se (&argse, NULL);
+++	  gfc_conv_expr_val (&argse, code->expr2);
+++	  stat = argse.expr;
+++	}
+++      else
+++	stat = null_pointer_node;
+++
+++      /* ERRMSG= only makes sense with STAT=.  */
+++      if (code->expr2 && code->expr3)
+++	{
+++	  gfc_init_se (&argse, NULL);
+++	  argse.want_pointer = 1;
+++	  gfc_conv_expr (&argse, code->expr3);
+++	  gfc_add_block_to_block (&se.pre, &argse.pre);
+++	  errmsg = argse.expr;
+++	  errmsg_len = fold_convert (size_type_node, argse.string_length);
+++	}
+++      else
+++	{
+++	  errmsg = null_pointer_node;
+++	  errmsg_len = build_zero_cst (size_type_node);
+++	}
+++
+++      if (stat != null_pointer_node && TREE_TYPE (stat) != integer_type_node)
+++	{
+++	  stat2 = stat;
+++	  stat = gfc_create_var (integer_type_node, "stat");
+++	}
++ 
++       tmp = build_call_expr_loc (input_location,
++-				 gfor_fndecl_caf_change_team, 2, team_type,
++-				 build_int_cst (integer_type_node, 0));
++-      gfc_add_expr_to_block (&argse.pre, tmp);
++-      gfc_add_block_to_block (&argse.pre, &argse.post);
++-      return gfc_finish_block (&argse.pre);
+++				 gfor_fndecl_caf_change_team, 4, team_type,
+++				 stat != null_pointer_node
+++				 ? gfc_build_addr_expr (NULL, stat) : stat,
+++				 errmsg, errmsg_len);
+++      gfc_add_expr_to_block (&se.pre, tmp);
+++      gfc_add_block_to_block (&se.pre, &team_typese.post);
+++      if (stat2 != NULL_TREE)
+++	gfc_add_modify (&se.pre, stat2,
+++			fold_convert (TREE_TYPE (stat2), stat));
+++      return gfc_finish_block (&se.pre);
++     }
++   else
++     {
++@@ -774,13 +870,58 @@ gfc_trans_change_team (gfc_code *code)
++ /* Translate the END TEAM statement.  */
++ 
++ tree
++-gfc_trans_end_team (gfc_code *code ATTRIBUTE_UNUSED)
+++gfc_trans_end_team (gfc_code *code)
++ {
++   if (flag_coarray == GFC_FCOARRAY_LIB)
++     {
++-      return build_call_expr_loc (input_location,
++-				  gfor_fndecl_caf_end_team, 1,
++-				  build_int_cst (pchar_type_node, 0));
+++      gfc_se argse, se;
+++      tree stat, errmsg, errmsg_len, tmp, stat2 = NULL_TREE;
+++
+++      gfc_init_se (&se, NULL);
+++      gfc_init_se (&argse, NULL);
+++      gfc_start_block (&se.pre);
+++
+++      if (code->expr1)
+++	{
+++	  gcc_assert (code->expr1->expr_type == EXPR_VARIABLE);
+++	  gfc_init_se (&argse, NULL);
+++	  gfc_conv_expr_val (&argse, code->expr1);
+++	  stat = argse.expr;
+++	}
+++      else
+++	stat = null_pointer_node;
+++
+++      if (code->expr2)
+++	{
+++	  gfc_init_se (&argse, NULL);
+++	  argse.want_pointer = 1;
+++	  gfc_conv_expr (&argse, code->expr2);
+++	  gfc_add_block_to_block (&se.pre, &argse.pre);
+++	  errmsg = argse.expr;
+++	  errmsg_len = fold_convert (size_type_node, argse.string_length);
+++	}
+++      else
+++	{
+++	  errmsg = null_pointer_node;
+++	  errmsg_len = build_zero_cst (size_type_node);
+++	}
+++
+++      if (stat != null_pointer_node && TREE_TYPE (stat) != integer_type_node)
+++	{
+++	  stat2 = stat;
+++	  stat = gfc_create_var (integer_type_node, "stat");
+++	}
+++
+++      tmp = build_call_expr_loc (input_location,
+++				 gfor_fndecl_caf_end_team, 3,
+++				 stat != null_pointer_node
+++				 ? gfc_build_addr_expr (NULL, stat) : stat,
+++				 errmsg, errmsg_len);
+++      gfc_add_expr_to_block (&se.pre, tmp);
+++      if (stat2 != NULL_TREE)
+++	gfc_add_modify (&se.pre, stat2,
+++			fold_convert (TREE_TYPE (stat2), stat));
+++      return gfc_finish_block (&se.pre);
++     }
++   else
++     {
++@@ -798,20 +939,63 @@ gfc_trans_sync_team (gfc_code *code)
++ {
++   if (flag_coarray == GFC_FCOARRAY_LIB)
++     {
++-      gfc_se argse;
++-      tree team_type, tmp;
+++      gfc_se argse, se, team_typese;
+++      tree team_type, stat, errmsg, errmsg_len, tmp, stat2 = NULL_TREE;
++ 
+++      gfc_init_se (&se, NULL);
++       gfc_init_se (&argse, NULL);
++-      gfc_conv_expr_val (&argse, code->expr1);
++-      team_type = gfc_build_addr_expr (ppvoid_type_node, argse.expr);
+++      gfc_init_se (&team_typese, NULL);
+++      gfc_start_block (&se.pre);
+++
+++      gfc_conv_expr_val (&team_typese, code->expr1);
+++      team_type = gfc_build_addr_expr (ppvoid_type_node, team_typese.expr);
+++
+++      gfc_add_block_to_block (&se.pre, &team_typese.pre);
+++
+++      /* STAT=.  */
+++      if (code->expr2)
+++	{
+++	  gcc_assert (code->expr2->expr_type == EXPR_VARIABLE);
+++	  gfc_init_se (&argse, NULL);
+++	  gfc_conv_expr_val (&argse, code->expr2);
+++	  stat = argse.expr;
+++	}
+++      else
+++	stat = null_pointer_node;
+++
+++      /* ERRMSG= only makes sense with STAT=.  */
+++      if (code->expr2 && code->expr3)
+++	{
+++	  gfc_init_se (&argse, NULL);
+++	  argse.want_pointer = 1;
+++	  gfc_conv_expr (&argse, code->expr3);
+++	  gfc_add_block_to_block (&se.pre, &argse.pre);
+++	  errmsg = argse.expr;
+++	  errmsg_len = fold_convert (size_type_node, argse.string_length);
+++	}
+++      else
+++	{
+++	  errmsg = null_pointer_node;
+++	  errmsg_len = build_zero_cst (size_type_node);
+++	}
+++
+++      if (stat != null_pointer_node && TREE_TYPE (stat) != integer_type_node)
+++	{
+++	  stat2 = stat;
+++	  stat = gfc_create_var (integer_type_node, "stat");
+++	}
++ 
++       tmp = build_call_expr_loc (input_location,
++-				 gfor_fndecl_caf_sync_team, 2,
++-				 team_type,
++-				 build_int_cst (integer_type_node, 0));
++-      gfc_add_expr_to_block (&argse.pre, tmp);
++-      gfc_add_block_to_block (&argse.pre, &argse.post);
++-      return gfc_finish_block (&argse.pre);
+++				 gfor_fndecl_caf_sync_team, 4, team_type,
+++				 stat != null_pointer_node
+++				 ? gfc_build_addr_expr (NULL, stat) : stat,
+++				 errmsg, errmsg_len);
+++      gfc_add_expr_to_block (&se.pre, tmp);
+++      gfc_add_block_to_block (&se.pre, &team_typese.post);
+++      if (stat2 != NULL_TREE)
+++	gfc_add_modify (&se.pre, stat2,
+++			fold_convert (TREE_TYPE (stat2), stat));
+++      return gfc_finish_block (&se.pre);
++     }
++   else
++     {
++@@ -1571,19 +1755,93 @@ gfc_trans_critical (gfc_code *code)
++ {
++   stmtblock_t block;
++   tree tmp, token = NULL_TREE;
+++  tree cond, stat = NULL_TREE, errmsg, errmsg_len, stat2 = NULL_TREE;
+++  gfc_se argse;
++ 
++   gfc_start_block (&block);
++ 
++   if (flag_coarray == GFC_FCOARRAY_LIB)
++     {
+++      /* STAT=.  */
+++      if (code->expr1)
+++	{
+++	  gcc_assert (code->expr1->expr_type == EXPR_VARIABLE);
+++	  gfc_init_se (&argse, NULL);
+++	  gfc_conv_expr_val (&argse, code->expr1);
+++	  stat = argse.expr;
+++	}
+++      else
+++	stat = null_pointer_node;
+++
+++      /* ERRMSG= only makes sense with STAT=.  */
+++      if (code->expr1 && code->expr2)
+++	{
+++	  gfc_init_se (&argse, NULL);
+++	  argse.want_pointer = 1;
+++	  gfc_conv_expr (&argse, code->expr2);
+++	  gfc_add_block_to_block (&block, &argse.pre);
+++	  errmsg = argse.expr;
+++	  errmsg_len = fold_convert (size_type_node, argse.string_length);
+++	}
+++      else
+++	{
+++	  errmsg = null_pointer_node;
+++	  errmsg_len = build_zero_cst (size_type_node);
+++	}
+++
+++      if (stat != null_pointer_node && TREE_TYPE (stat) != integer_type_node)
+++	{
+++	  stat2 = stat;
+++	  stat = gfc_create_var (integer_type_node, "stat");
+++	}
+++
++       token = gfc_get_symbol_decl (code->resolved_sym);
++       token = GFC_TYPE_ARRAY_CAF_TOKEN (TREE_TYPE (token));
++       tmp = build_call_expr_loc (input_location, gfor_fndecl_caf_lock, 7,
++ 				 token, integer_zero_node, integer_one_node,
++-				 null_pointer_node, null_pointer_node,
++-				 null_pointer_node, integer_zero_node);
+++				 null_pointer_node,
+++				 stat != null_pointer_node
+++				 ? gfc_build_addr_expr (NULL, stat) : stat,
+++				 errmsg, errmsg_len);
++       gfc_add_expr_to_block (&block, tmp);
++ 
+++      if (stat != null_pointer_node)
+++      {
+++	/* If stat is set to one of STAT_UNLOCKED_FAILED_IMAGE or
+++	 * STAT_FAILED_IMAGE, set its value to the other.
+++	 */
+++	 /* (stat == STAT_FAILED_IMAGE) */
+++	cond = fold_build2_loc (input_location, EQ_EXPR, logical_type_node,
+++				stat, build_int_cst (integer_type_node,
+++						     GFC_STAT_FAILED_IMAGE));
+++	/* (((stat == STAT_FAILED_IMAGE) ? STAT_UNLOCKED_FAILED_IMAGE : stat) */
+++	tmp = fold_build3_loc (input_location, COND_EXPR, integer_type_node,
+++			       cond, build_int_cst (integer_type_node,
+++					      GFC_STAT_UNLOCKED_FAILED_IMAGE),
+++			       stat);
+++	/* (stat == STAT_UNLOCKED_FAILED_IMAGE) */
+++	cond = fold_build2_loc (input_location, EQ_EXPR, logical_type_node,
+++				stat, build_int_cst (integer_type_node,
+++					     GFC_STAT_UNLOCKED_FAILED_IMAGE));
+++	/* (stat == STAT_UNLOCKED_FAILED_IMAGE) ? STAT_FAILED_IMAGE :
+++	 *  ((stat == STAT_FAILED_IMAGE) ? STAT_UNLOCKED_FAILED_IMAGE : stat)
+++	 */
+++	tmp = fold_build3_loc (input_location, COND_EXPR, integer_type_node,
+++			       cond, build_int_cst (integer_type_node,
+++						    GFC_STAT_FAILED_IMAGE),
+++			       tmp);
+++
+++	/* assign result to stat.  */
+++	gfc_add_modify (&block, stat,
+++			fold_convert (TREE_TYPE (stat), tmp));
+++
+++	gfc_add_expr_to_block (&block, tmp);
+++
+++	if (stat2 != NULL_TREE)
+++	  gfc_add_modify (&block, stat2,
+++			  fold_convert (TREE_TYPE (stat2), stat));
+++      }
+++
++       /* It guarantees memory consistency within the same segment */
++       tmp = gfc_build_string_const (strlen ("memory")+1, "memory"),
++ 	tmp = build5_loc (input_location, ASM_EXPR, void_type_node,
++@@ -1601,10 +1859,18 @@ gfc_trans_critical (gfc_code *code)
++ 
++   if (flag_coarray == GFC_FCOARRAY_LIB)
++     {
+++      /* END CRITICAL does not accept STAT or ERRMSG arguments.
+++       * If STAT= is specified for CRITICAL, pass a stat argument to
+++       * _gfortran_caf_lock_unlock to prevent termination in the event of an
+++       * error, but ignore any value assigned to it.
+++       */
++       tmp = build_call_expr_loc (input_location, gfor_fndecl_caf_unlock, 6,
++ 				 token, integer_zero_node, integer_one_node,
++-				 null_pointer_node, null_pointer_node,
++-				 integer_zero_node);
+++				 stat != NULL_TREE
+++				 ? gfc_build_addr_expr (NULL,
+++				    gfc_create_var (integer_type_node, "stat"))
+++				 : null_pointer_node,
+++				 null_pointer_node, integer_zero_node);
++       gfc_add_expr_to_block (&block, tmp);
++ 
++       /* It guarantees memory consistency within the same segment */
++diff --git a/gcc/testsuite/gfortran.dg/coarray_critical_2.f90 b/gcc/testsuite/gfortran.dg/coarray_critical_2.f90
++new file mode 100644
++index 00000000000..1a698eadab8
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/coarray_critical_2.f90
++@@ -0,0 +1,27 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib" }
+++!
+++! Test critical syntax errors with stat= and errmsg= specifiers
+++!
+++  implicit none
+++  integer :: istat
+++  character(len=30) :: err
+++
+++  critical (stat=err) ! { dg-error "must be a scalar INTEGER" }
+++    continue
+++  end critical
+++
+++  critical (stat=istat, stat=istat) ! { dg-error "Redundant STAT" }
+++    continue
+++  end critical
+++
+++  critical (stat=istat, errmsg=istat) ! { dg-error "must be a scalar CHARACTER variable" }
+++    continue
+++  end critical
+++
+++  critical (stat=istat, errmsg=err, errmsg=err) ! { dg-error "Redundant ERRMSG" }
+++    continue
+++  end critical
+++
+++end
++diff --git a/gcc/testsuite/gfortran.dg/coarray_critical_3.f90 b/gcc/testsuite/gfortran.dg/coarray_critical_3.f90
++new file mode 100644
++index 00000000000..233712cc12e
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/coarray_critical_3.f90
++@@ -0,0 +1,20 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib -fdump-tree-original" }
+++!
+++! Test critical construct with stat= and errmsg= specifiers
+++!
+++  use, intrinsic :: iso_fortran_env, only: int16
+++  implicit none
+++  integer :: istat
+++  integer(kind=int16) :: istat16
+++  character(len=30) :: err
+++
+++  critical (stat=istat, errmsg=err)
+++    continue
+++  end critical
+++end
+++
+++! { dg-final { scan-tree-dump "_gfortran_caf_lock \\(caf_token.\[0-9\]+, 0, 1, 0B, &istat, &err, 30\\);" "original" } }
+++! { dg-final { scan-tree-dump "istat = istat != 6002 \\? istat != 6001 \\? istat : 6002 : 6001;" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_unlock \\(caf_token.\[0-9\]+, 0, 1, &stat.\[0-9\]+, 0B, 0\\);" "original" } }
++diff --git a/gcc/testsuite/gfortran.dg/coarray_critical_4.f90 b/gcc/testsuite/gfortran.dg/coarray_critical_4.f90
++new file mode 100644
++index 00000000000..2d73b90bde1
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/coarray_critical_4.f90
++@@ -0,0 +1,20 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib -fdump-tree-original" }
+++!
+++! Test critical construct with (int16) stat= and errmsg= specifiers
+++!
+++  use, intrinsic :: iso_fortran_env, only: int16
+++  implicit none
+++  integer(kind=int16) :: istat
+++  character(len=30) :: err
+++
+++  critical (stat=istat, errmsg=err)
+++    continue
+++  end critical
+++end
+++
+++! { dg-final { scan-tree-dump "_gfortran_caf_lock \\(caf_token.\[0-9\]+, 0, 1, 0B, &stat.\[0-9\]+, &err, 30\\);" "original" } }
+++! { dg-final { scan-tree-dump "stat.\[0-9\]+ = stat.\[0-9\]+ != 6002 \\? stat.\[0-9\]+ != 6001 \\? stat.\[0-9\]+ : 6002 : 6001;" "original" } }
+++! { dg-final { scan-tree-dump "istat = \\(integer\\(kind=\[0-9\]+\\)\\) stat.\[0-9\]+" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_unlock \\(caf_token.\[0-9\]+, 0, 1, &stat.\[0-9\]+, 0B, 0\\);" "original" } }
++diff --git a/gcc/testsuite/gfortran.dg/team_change_2.f90 b/gcc/testsuite/gfortran.dg/team_change_2.f90
++new file mode 100644
++index 00000000000..6e8971ce31f
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/team_change_2.f90
++@@ -0,0 +1,41 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib" }
+++!
+++! Tests change team syntax
+++!
+++  use iso_fortran_env, only : team_type
+++  implicit none
+++  type(team_type) :: team
+++  integer :: new_team, istat
+++  character(len=30) :: err
+++
+++  new_team = mod(this_image(),2)+1
+++
+++  form team (new_team,team)
+++
+++  change team ! { dg-error "Syntax error in CHANGE TEAM statement" }
+++    continue
+++  end team
+++
+++  change team (err) ! { dg-error "must be a scalar TEAM_TYPE expression" }
+++    continue
+++  end team
+++
+++  change team (team, stat=err) ! { dg-error "must be a scalar INTEGER" }
+++    continue
+++  end team
+++
+++  change team (team, stat=istat, stat=istat) ! { dg-error "Redundant STAT" }
+++    continue
+++  end team
+++
+++  change team (team, stat=istat, errmsg=istat) ! { dg-error "must be a scalar CHARACTER variable" }
+++    continue
+++  end team
+++
+++  change team (team, stat=istat, errmsg=str, errmsg=str) ! { dg-error "Redundant ERRMSG" }
+++    continue
+++  end team
+++end
+++
++diff --git a/gcc/testsuite/gfortran.dg/team_change_3.f90 b/gcc/testsuite/gfortran.dg/team_change_3.f90
++new file mode 100644
++index 00000000000..f835ccdb350
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/team_change_3.f90
++@@ -0,0 +1,28 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib -fdump-tree-original" }
+++!
+++! Tests change team stat= and errmsg= specifiers
+++!
+++  use iso_fortran_env, only : team_type
+++  implicit none
+++  type(team_type) :: team
+++  integer :: new_team, istat
+++  character(len=30) :: err
+++
+++  new_team = mod(this_image(),2)+1
+++
+++  form team (new_team,team)
+++
+++  change team (team, stat=istat)
+++    continue
+++  end team
+++
+++  change team (team, stat=istat, errmsg=err)
+++    continue
+++  end team
+++
+++end
+++
+++! { dg-final { scan-tree-dump "_gfortran_caf_change_team \\(&team, &istat, 0B, 0\\)" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_change_team \\(&team, &istat, &err, 30\\)" "original" } }
++diff --git a/gcc/testsuite/gfortran.dg/team_end_2.f90 b/gcc/testsuite/gfortran.dg/team_end_2.f90
++new file mode 100644
++index 00000000000..4953edb056f
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/team_end_2.f90
++@@ -0,0 +1,33 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib" }
+++!
+++! Tests change team syntax
+++!
+++  use iso_fortran_env, only : team_type
+++  implicit none
+++  type(team_type) :: team
+++  integer :: new_team, istat
+++  character(len=30) :: err
+++
+++  new_team = mod(this_image(),2)+1
+++
+++  form team (new_team,team)
+++
+++  change team (team)
+++    continue
+++  end team (stat=err) ! { dg-error "must be a scalar INTEGER" }
+++
+++  change team (team)
+++    continue
+++  end team (stat=istat, stat=istat) ! { dg-error "Redundant STAT" }
+++
+++  change team (team)
+++    continue
+++  end team (stat=istat, errmsg=istat) ! { dg-error "must be a scalar CHARACTER variable" }
+++
+++  change team (team)
+++    continue
+++  end team (stat=istat, errmsg=str, errmsg=str) ! { dg-error "Redundant ERRMSG" }
+++end
+++
++diff --git a/gcc/testsuite/gfortran.dg/team_end_3.f90 b/gcc/testsuite/gfortran.dg/team_end_3.f90
++new file mode 100644
++index 00000000000..6638f933510
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/team_end_3.f90
++@@ -0,0 +1,28 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib -fdump-tree-original" }
+++!
+++! Tests end team stat= and errmsg= specifiers
+++!
+++  use iso_fortran_env, only : team_type
+++  implicit none
+++  type(team_type) :: team
+++  integer :: new_team, istat
+++  character(len=30) :: err
+++
+++  new_team = mod(this_image(),2)+1
+++
+++  form team (new_team,team)
+++
+++  change team (team)
+++    continue
+++  end team (stat=istat)
+++
+++  change team (team)
+++    continue
+++  end team (stat=istat, errmsg=err)
+++
+++end
+++
+++! { dg-final { scan-tree-dump "_gfortran_caf_end_team \\(&istat, 0B, 0\\)" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_end_team \\(&istat, &err, 30\\)" "original" } }
++diff --git a/gcc/testsuite/gfortran.dg/team_form_2.f90 b/gcc/testsuite/gfortran.dg/team_form_2.f90
++new file mode 100644
++index 00000000000..c47c372f143
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/team_form_2.f90
++@@ -0,0 +1,26 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib" }
+++!
+++! Tests form team syntax errors
+++!
+++  use iso_fortran_env, only : team_type
+++  implicit none
+++  integer :: istat, new_team
+++  character(len=30) :: err
+++  type(team_type) :: team
+++
+++   new_team = mod(this_image(),2)+1
+++
+++  form team ! { dg-error "Syntax error in FORM TEAM statement" }
+++  form team (new_team) ! { dg-error "Syntax error in FORM TEAM statement" }
+++  form team (new_team,err) ! { dg-error "must be a scalar of type TEAM_TYPE" }
+++  form team (new_team,team,istat) ! { dg-error "Syntax error in FORM TEAM statement" }
+++  form team (new_team,team,stat=istat,stat=istat) ! { dg-error "Redundant STAT" }
+++  form team (new_team,team,stat=istat,errmsg=istat) ! { dg-error "must be a scalar CHARACTER variable" }
+++  form team (new_team,team,stat=istat,errmsg=err,errmsg=err) ! { dg-error "Redundant ERRMSG" }
+++  form team (new_team,team,new_index=1,new_index=1) ! { dg-error "Redundant NEW_INDEX" }
+++  form team (new_team,team,new_index=err) ! { dg-error "must be a scalar INTEGER" }
+++  form team (new_team,team,new_index=1,new_index=1,stat=istat,errmsg=err) ! { dg-error "Redundant NEW_INDEX" }
+++
+++end
++diff --git a/gcc/testsuite/gfortran.dg/team_form_3.f90 b/gcc/testsuite/gfortran.dg/team_form_3.f90
++new file mode 100644
++index 00000000000..d6957931905
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/team_form_3.f90
++@@ -0,0 +1,28 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib -fdump-tree-original" }
+++!
+++! Tests form team with stat= and errmsg=
+++!
+++  use iso_fortran_env, only : team_type
+++  implicit none
+++  integer :: istat, new_team
+++  character(len=30) :: err = "unchanged"
+++  type(team_type) :: team
+++
+++  new_team = mod(this_image(),2)+1
+++
+++  form team (new_team,team)
+++  form team (new_team,team,stat=istat)
+++  form team (new_team,team,stat=istat, errmsg=err)
+++  form team (new_team,team,new_index=1)
+++  form team (new_team,team,new_index=1,stat=istat)
+++  form team (new_team,team,new_index=1,stat=istat,errmsg=err)
+++end
+++
+++! { dg-final { scan-tree-dump "_gfortran_caf_form_team \\(new_team, &team, 0B, 0B, 0B, 0\\)" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_form_team \\(new_team, &team, 0B, &istat, 0B, 0\\)" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_form_team \\(new_team, &team, 0B, &istat, &err, 30\\)" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_form_team \\(new_team, &team, 1, 0B, 0B, 0\\)" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_form_team \\(new_team, &team, 1, &istat, 0B, 0\\)" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_form_team \\(new_team, &team, 1, &istat, &err, 30\\)" "original" } }
++diff --git a/gcc/testsuite/gfortran.dg/team_sync_1.f90 b/gcc/testsuite/gfortran.dg/team_sync_1.f90
++new file mode 100644
++index 00000000000..5e496816cc9
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/team_sync_1.f90
++@@ -0,0 +1,24 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib" }
+++!
+++! Test sync team syntax errors
+++!
+++  use iso_fortran_env, only : team_type
+++  implicit none
+++  integer :: istat
+++  character(len=30) :: err
+++  type(team_type) :: team
+++
+++  form team (mod(this_image(),2)+1, team)
+++
+++  change team (team)
+++    sync team ! { dg-error "Syntax error in SYNC TEAM statement" }
+++    sync team (err) ! { dg-error "must be a scalar TEAM_TYPE expression" }
+++    sync team (team, istat) ! { dg-error "Syntax error in SYNC TEAM statement" }
+++    sync team (team, stat=err) ! { dg-error "must be a scalar INTEGER" }
+++    sync team (team, stat=istat, stat=istat) ! { dg-error "Redundant STAT" }
+++    sync team (team, stat=istat, errmsg=istat) ! { dg-error "must be a scalar CHARACTER variable" }
+++    sync team (team, stat=istat, errmsg=err, errmsg=err) ! { dg-error "Redundant ERRMSG" }
+++  end team
+++end
++diff --git a/gcc/testsuite/gfortran.dg/team_sync_2.f90 b/gcc/testsuite/gfortran.dg/team_sync_2.f90
++new file mode 100644
++index 00000000000..9884e4e6857
++--- /dev/null
+++++ b/gcc/testsuite/gfortran.dg/team_sync_2.f90
++@@ -0,0 +1,24 @@
+++! PR 87939
+++! { dg-do compile }
+++! { dg-options "-fcoarray=lib -fdump-tree-original" }
+++!
+++! Test sync team statement
+++!
+++  use iso_fortran_env, only : team_type
+++  implicit none
+++  integer :: istat
+++  type(team_type) :: team
+++  character(len=30) :: err = "unchanged"
+++
+++  form team (mod(this_image(),2)+1, team)
+++
+++  change team (team)
+++    sync team (team)
+++    sync team (team, stat=istat)
+++    sync team (team, stat=istat, errmsg=err)
+++  end team
+++end
+++
+++! { dg-final { scan-tree-dump "_gfortran_caf_sync_team \\(&team, 0B, 0B, 0\\)" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_sync_team \\(&team, &istat, 0B, 0\\)" "original" } }
+++! { dg-final { scan-tree-dump "_gfortran_caf_sync_team \\(&team, &istat, &err, 30\\)" "original" } }
++diff --git a/libgfortran/caf/libcaf.h b/libgfortran/caf/libcaf.h
++index d1cfa8dd914..09deb28773d 100644
++--- a/libgfortran/caf/libcaf.h
+++++ b/libgfortran/caf/libcaf.h
++@@ -50,7 +50,8 @@ typedef enum
++   CAF_STAT_LOCKED,
++   CAF_STAT_LOCKED_OTHER_IMAGE,
++   CAF_STAT_STOPPED_IMAGE = 6000,
++-  CAF_STAT_FAILED_IMAGE  = 6001
+++  CAF_STAT_FAILED_IMAGE  = 6001,
+++  CAF_STAT_UNLOCKED_FAILED_IMAGE = 6002
++ }
++ caf_stat_codes_t;
++ 
