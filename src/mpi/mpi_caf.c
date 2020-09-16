@@ -2031,8 +2031,8 @@ PREFIX(sendget) (caf_token_t token_s, size_t offset_s, int image_index_s,
          "dst_image_index = %d, offset_src = %zd, offset_dst = %zd.\n",
          src_vector, dst_vector, image_index_g, image_index_s,
          offset_g, offset_s);
-  check_image_health(image_index_g, stat);
-  check_image_health(image_index_s, stat);
+  check_image_health(src_remote_image+1, stat);
+  check_image_health(dst_remote_image+1, stat);
 
   /* For char arrays: create the padding array, when dst is longer than src. */
   if (dest_char_array_is_longer)
@@ -2291,7 +2291,7 @@ case kind:                                                            \
     CAF_Win_unlock(src_remote_image, *p);
 
 #ifdef WITH_FAILED_IMAGES
-    check_image_health(image_index_g, stat);
+    check_image_health(src_remote_image+1, stat);
 
     if (!stat && ierr == STAT_FAILED_IMAGE)
       terminate_internal(ierr, 1);
@@ -2600,7 +2600,7 @@ case kind:                                                              \
     CAF_Win_unlock(dst_remote_image, *p);
 
 #ifdef WITH_FAILED_IMAGES
-    check_image_health(image_index_s, stat);
+    check_image_health(dst_remote_image+1, stat);
 
     if (!stat && ierr == STAT_FAILED_IMAGE)
       terminate_internal(ierr, 1);
@@ -2694,8 +2694,8 @@ case kind:                                                           \
 
 #ifdef WITH_FAILED_IMAGES
   /* Catch failed images, when failed image support is active. */
-  check_image_health(image_index_g , stat);
-  check_image_health(image_index_s , stat);
+  check_image_health(src_remote_image+1 , stat);
+  check_image_health(dst_remote_image+1 , stat);
 #endif
 
   if (ierr != MPI_SUCCESS)
@@ -2787,7 +2787,7 @@ PREFIX(send) (caf_token_t token, size_t offset, int image_index,
 
   dprint("dst_vector = %p, image_index = %d, offset = %zd.\n",
          dst_vector, image_index, offset);
-  check_image_health(image_index, stat);
+  check_image_health(remote_image+1, stat);
 
   /* For char arrays: create the padding array, when dst is longer than src. */
   if (dest_char_array_is_longer)
@@ -3043,7 +3043,7 @@ case kind:                                                            \
     CAF_Win_unlock(remote_image, *p);
 
 #ifdef WITH_FAILED_IMAGES
-    check_image_health(image_index, stat);
+    check_image_health(remote_image+1, stat);
 
     if (!stat && ierr == STAT_FAILED_IMAGE)
       terminate_internal(ierr, 1);
@@ -3266,7 +3266,7 @@ case kind:                                                            \
 
 #ifdef WITH_FAILED_IMAGES
   /* Catch failed images, when failed image support is active. */
-  check_image_health(image_index , stat);
+  check_image_health(remote_image+1 , stat);
 #endif
 
   if (ierr != MPI_SUCCESS)
@@ -3356,7 +3356,7 @@ PREFIX(get) (caf_token_t token, size_t offset, int image_index,
 
   dprint("src_vector = %p, image_index = %d, offset = %zd.\n",
          src_vector, image_index, offset);
-  check_image_health(image_index, stat);
+  check_image_health(remote_image+1, stat);
 
   /* For char arrays: create the padding array, when dst is longer than src. */
   if (dest_char_array_is_longer)
@@ -3592,7 +3592,7 @@ case kind:                                                            \
     CAF_Win_unlock(remote_image, *p);
 
 #ifdef WITH_FAILED_IMAGES
-    check_image_health(image_index, stat);
+    check_image_health(remote_image+1, stat);
 
     if (!stat && ierr == STAT_FAILED_IMAGE)
       terminate_internal(ierr, 1);
@@ -3779,7 +3779,7 @@ case kind:                                                          \
 
 #ifdef WITH_FAILED_IMAGES
   /* Catch failed images, when failed image support is active. */
-  check_image_health(image_index , stat);
+  check_image_health(remote_image+1 , stat);
 #endif
 
   if (ierr != MPI_SUCCESS)
