@@ -1,5 +1,7 @@
 # OpenCoarrays-ft
 
+[![DOI](https://zenodo.org/badge/295230177.svg)](https://zenodo.org/badge/latestdoi/295230177)
+
 Artifacts for research paper:
 
 N. Weeks, G. Luecke, G. Prabhu, "Refining Fortran Failed Images", 2020 [submitted]
