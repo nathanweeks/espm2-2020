@@ -6879,7 +6879,7 @@ sync_images_internal(int count, int images[], int *stat, char *errmsg,
     explicit_flush();
 #endif
 
-#ifdef defined(WITH_FAILED_IMAGES) && defined(WITH_ALIVE_REQUEST)
+#if defined(WITH_FAILED_IMAGES) && defined(WITH_ALIVE_REQUEST)
     /* Provoke detecting process fails. */
     ierr = MPI_Test(&alive_request, &flag, MPI_STATUS_IGNORE); chk_err(ierr);
 #endif
