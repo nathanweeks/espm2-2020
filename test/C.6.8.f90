@@ -29,11 +29,13 @@ PROGRAM possibly_recoverable_simulation
     ! Team 2 is the set of spares, so does not participate.
     FORM TEAM (team_number, simulation_team, NEW_INDEX=local_index, &
                STAT=status)
+! COMMENT: Fortran 2018 does requires the optional TEAM argument to NUM_IMAGES to refer to the current team or an ancestor
+!          team; however, if a child team were permitted, then NUM_IMAGES(TEAM=simulation_team) could be used to efficiently
+!          determine if the simulation_team has the required number of images to proceed (without the more expensive
+!          synchronization implied by CHANGE TEAM for images in team_number == 1)
 ! COMMENT: FAILED_IMAGES(TEAM=GET_TEAM(PARENT_TEAM)) not supported (due to lack of PARENT_TEAM and GET_TEAM() in
 !          GFortran/OpenCoarrays); save failures here to reference in simulation_procedure
     failures = failed_images()
-! COMMENT: such tests were originally added to handle image failure that resulted in a gap in FORM TEAM NEW_INDEX values
-    !IF (status/=0 .AND. status/=STAT_FAILED_IMAGE) EXIT outer
     IF (team_number == 1) THEN
 ! COMMENT: (optimization) CHANGE TEAM needn't be called by team_number == 2.
       CHANGE TEAM (simulation_team, STAT=status)
