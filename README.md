@@ -4,7 +4,7 @@
 
 Artifacts for research paper:
 
-N. Weeks, G. Luecke, G. Prabhu, "Refining Fortran Failed Images", 2020 [submitted]
+N. Weeks, G. Luecke, G. Prabhu, "Refining Fortran Failed Images", 2020 IEEE/ACM 5th International Workshop on Extreme Scale Programming Models and Middleware (ESPM2) [accepted]
 
 ## Usage
 
@@ -16,7 +16,7 @@ The included Makefile automates commands for pulling, running and optionally bui
 
 ### Docker
 
-To pull Docker image and execute the three example applications (described in the paper) in the test/ direcory:
+To pull the existing production container image and execute the three example applications (described in the paper) in the test/ direcory using Docker (assuming local Docker daemon):
 
 ```
 make pull
@@ -29,6 +29,14 @@ By default, 8 (Fortran) images (processes) will be used.
 
 To use a different number, override the NPROC macro; e.g., `make NPROC=16 C.6.8`
 
+To build a container image from source:
+
+```
+make
+```
+
+See the Dockerfile for other build targets.
+
 ### Shifter
 
 To run the container at NERSC using Shifter:
@@ -39,4 +47,11 @@ make salloc
 make shifter-monte_carlo_pi-1
 make shifter-monte_carlo_pi-2
 make shifter-C.6.8
+```
+
+To run the (batch) benchmarks featured in the paper:
+```
+make shifter-pull
+make benchmark
+make sole_survivor
 ```

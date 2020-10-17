@@ -1,0 +1,35 @@
+#!/bin/sh
+#SBATCH --nodes=64
+#SBATCH --constraint=knl
+#SBATCH --time=00:15:00
+#SBATCH --qos=debug
+#SBATCH --module=none
+#SBATCH --license=SCRATCH
+
+set -o xtrace -o errexit
+# INC0157997
+srun shifter <<END
+chmod +w /opt/udiImage/etc/sshd_config
+cp -f /opt/udiImage/etc/sshd_config /tmp/sshd_config
+sed "s|/opt/udiImage/etc/user_auth_keys|$HOME/.udiRoot/id_rsa.key.pub|" /tmp/sshd_config > /opt/udiImage/etc/sshd_config
+pkill -HUP -x /opt/udiImage/sbin/sshd
+END
+
+sbcast test/sole_survivor.x /tmp/sole_survivor.x
+
+rep=1
+while [ ${rep} -le 30 ]
+do
+  np=2
+  while [ ${np} -le ${SLURM_JOB_NUM_NODES} ]
+  do
+    shifter mpiexec -n ${np} \
+                    -N 1 \
+                    --output-directory ${SCRATCH}/sole_survivor/rep${rep}/${np}:nocopy \
+                    --mca plm_rsh_agent /opt/udiImage/bin/ssh \
+                    --mca plm '^slurm' \
+                    /tmp/sole_survivor.x
+    np=$((np*2))
+  done
+  rep=$((rep+1))
+done

@@ -84,9 +84,13 @@ ARG BUILD_TYPE
 
 RUN mkdir OpenCoarrays-ft/OpenCoarrays-ft-build \
   && cd OpenCoarrays-ft/OpenCoarrays-ft-build \
-  && cmake .. -DCMAKE_INSTALL_PREFIX=/opt/opencoarrays-ft -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Release} -DCAF_ENABLE_FAILED_IMAGES=TRUE -DGFORTRAN_PR87939=TRUE \
+  && cmake .. -DCMAKE_INSTALL_PREFIX=/opt/opencoarrays-ft -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-RelWithDebInfo} -DCAF_ENABLE_FAILED_IMAGES=TRUE -DGFORTRAN_PR87939=TRUE \
   && make \
   && make install/fast
+
+FROM opencoarrays-ft-builder AS opencoarrays-ft-test
+WORKDIR /OpenCoarrays-ft/OpenCoarrays-ft-build
+RUN make test
 
 FROM ulfm2 AS opencoarrays-ft
 # Shifter needs user's host login shell inside the container for ssh to function

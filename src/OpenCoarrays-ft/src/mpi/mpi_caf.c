@@ -8417,32 +8417,36 @@ static void sync_team_internal (MPI_Comm team_comm, int *stat,
 #endif
 
 #ifdef WITH_FAILED_IMAGES
-    /* Use MPIX_Comm_agree() as the barrier to ensure synchronization with
-     * active images. Disable the error handler to avoid issues when it's
-     * invoked during MPICH MPIX_Comm_agree(). */
-    int flag = 1, num_failed_in_group, rc;
-    MPI_Group failed_group;
-    ierr = MPI_Comm_set_errhandler(team_comm, MPI_ERRORS_RETURN); chk_err(ierr);
-    /* Example 15.3 (Fault-Tolerant Consistent Group of Failures Example
-     * (Agree variant)) from 2017-02-21 ULFM spec */
-    do {
-      rc = MPIX_Comm_failure_ack(team_comm); chk_err(rc);
-      dprint("Before MPIX_Comm_agree()\n");
-      rc = MPIX_Comm_agree(team_comm, &flag); chk_err(rc);
-      dprint("After MPIX_Comm_agree()\n");
-    } while (rc != MPI_SUCCESS);
-    MPI_Comm_set_errhandler(team_comm, failed_CAF_COMM_mpi_err_handler);
-    rc = MPIX_Comm_failure_get_acked(team_comm, &failed_group); chk_err(rc);
-    rc = MPI_Group_size(failed_group, &num_failed_in_group); chk_err(rc);
-    dprint("num_failed_in_group: %d\n", num_failed_in_group);
-    if (num_failed_in_group > 0) {
-      ierr = MPI_SUCCESS;
-      failed_stopped_errorhandler_function(&team_comm, &ierr);
-      ierr = STAT_FAILED_IMAGE;
+    if (stat != NULL)
+    {
+      /* Use MPIX_Comm_agree() as the barrier to ensure synchronization with
+       * active images. Disable the error handler to avoid issues when it's
+       * invoked during MPICH MPIX_Comm_agree(). */
+      int flag = 1, num_failed_in_group, rc;
+      MPI_Group failed_group;
+      ierr = MPI_Comm_set_errhandler(team_comm, MPI_ERRORS_RETURN); chk_err(ierr);
+      /* Example 15.3 (Fault-Tolerant Consistent Group of Failures Example
+       * (Agree variant)) from 2017-02-21 ULFM spec */
+      do {
+        rc = MPIX_Comm_failure_ack(team_comm); chk_err(rc);
+        dprint("Before MPIX_Comm_agree()\n");
+        rc = MPIX_Comm_agree(team_comm, &flag); chk_err(rc);
+        dprint("After MPIX_Comm_agree()\n");
+      } while (rc != MPI_SUCCESS);
+      MPI_Comm_set_errhandler(team_comm, failed_CAF_COMM_mpi_err_handler);
+      rc = MPIX_Comm_failure_get_acked(team_comm, &failed_group); chk_err(rc);
+      rc = MPI_Group_size(failed_group, &num_failed_in_group); chk_err(rc);
+      dprint("num_failed_in_group: %d\n", num_failed_in_group);
+      if (num_failed_in_group > 0) {
+        ierr = MPI_SUCCESS;
+        /* acknowledge failures & update set of images known to have failed */
+        failed_stopped_errorhandler_function(&team_comm, &ierr);
+        ierr = STAT_FAILED_IMAGE;
+      }
     }
-#else
-    ierr = MPI_Barrier(team_comm); chk_err(ierr);
+    else
 #endif
+    ierr = MPI_Barrier(team_comm); chk_err(ierr);
     if (ierr == STAT_FAILED_IMAGE)
       err = STAT_FAILED_IMAGE;
     else if (ierr != 0)

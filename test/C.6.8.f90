@@ -113,9 +113,10 @@ CONTAINS
 
     map(available_spares(:size(new_failures_active))) = new_failures_active
 
-    if (map(this_image()) /= SPARE) then
+    if (map(this_image()) /= SPARE) then ! this spare image replaces a failed image
         team_number = 1
         local_index = map(this_image())
+        deallocate(old_failures, map) ! no longer needed
     end if
   END SUBROUTINE
 

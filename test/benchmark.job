@@ -1,0 +1,27 @@
+#!/bin/sh
+#SBATCH --nodes=64
+#SBATCH --constraint=knl
+#SBATCH --time=00:05:00
+#SBATCH --qos=debug
+#SBATCH --module=none
+#SBATCH --license=SCRATCH
+# NOTE: /opt/udiImage/etc/sshd_config could not be written to on the above nodes
+
+set -o xtrace -o errexit
+# INC0157997
+srun shifter <<END
+chmod +w /opt/udiImage/etc/sshd_config
+cp -f /opt/udiImage/etc/sshd_config /tmp/sshd_config
+sed "s|/opt/udiImage/etc/user_auth_keys|$HOME/.udiRoot/id_rsa.key.pub|" /tmp/sshd_config > /opt/udiImage/etc/sshd_config
+pkill -HUP -x /opt/udiImage/sbin/sshd
+END
+
+sbcast test/benchmark.x /tmp/benchmark.x
+
+np=2
+while [ ${np} -le ${SLURM_JOB_NUM_NODES} ]
+do
+  shifter mpiexec -n ${np} -N 1 --output-directory ${SCRATCH}/benchmark/no_ft/${np}:nocopy --mca plm_rsh_agent /opt/udiImage/bin/ssh --mca plm '^slurm' --mca mpi_ft_enable false /tmp/benchmark.x
+  shifter mpiexec -n ${np} -N 1 --output-directory ${SCRATCH}/benchmark/ft/${np}:nocopy       --mca plm_rsh_agent /opt/udiImage/bin/ssh --mca plm '^slurm' /tmp/benchmark.x
+  np=$((np*2))
+done
