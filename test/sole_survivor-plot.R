@@ -4,7 +4,7 @@ sole_survivor$num_images <- factor(sole_survivor$num_images,
                                    levels=as.character(sort(as.integer(levels(sole_survivor$num_images)))))
 
 # active_images == 0: total time for a given repetition
-pdf("sole_survivor.pdf")
+svg("sole_survivor.svg")
 barplot(t(aggregate(cbind(1000*time.end_team, 1000*time.form_team, 1000*time.change_team) ~ num_images, data = subset(sole_survivor, active_images > 0), FUN = "mean")[,-1]),
     names = c("2","4","8","16","32","64"),
     xlab = "Number of images",

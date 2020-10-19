@@ -12,7 +12,7 @@ benchmark = rbind(transform(subset(benchmark.no_ft,
 benchmark$num_images <- factor(benchmark$num_images,
                                levels=as.character(sort(as.integer(levels(benchmark$num_images)))))
 
-pdf("form_team.pdf")
+svg("form_team.svg")
 boxplot(time.form_team*1000 ~ num_images + stat,
         lex.order = T,
         data=benchmark,
@@ -23,7 +23,7 @@ boxplot(time.form_team*1000 ~ num_images + stat,
         at=c(1:3,5:7,9:11,13:15,17:19,21:23),
         xlab = "Number of images",
         ylab="Time (milliseconds)")
-title("FORM TEAM (MPI_COMM_SPLIT + MPI_BARRIER/MPI_COMM_AGREE)")
+title("FORM TEAM")
 axis(side=1, at=c(2,6,10,14,18,22), labels = c("2","4","8","16","32","64"))
 axis(side=1, tck=1, at=c(4,8,12,16,20), col.ticks="dark gray", labels=FALSE)
 axis(side=2, tck=1, col.ticks="light gray", labels=FALSE)
@@ -33,7 +33,7 @@ dev.off()
 
 
 
-pdf("change_end_team.pdf")
+svg("change_end_team.svg")
 boxplot((time.change_team+time.end_team)/2*1000 ~ num_images + stat,
         lex.order = T,
         data=benchmark,
