@@ -9,7 +9,7 @@
 REPO=ghcr.io/nathanweeks/espm2-2020
 GCC_TAG=gcc-9.3.0-pr87939_alpine3.12.0
 ULFM2_TAG=ulfm2-20200131-0823ee3_$(GCC_TAG)
-OPENCOARRAYS_TAG=opencoarrays-2.8.0-862771a_$(ULFM2_TAG)
+OPENCOARRAYS_TAG=opencoarrays-2.8.0-2d11794_$(ULFM2_TAG)
 
 # number of processors to use for testing
 NPROC=8
@@ -142,12 +142,14 @@ clean:
 
 shifter-build: FORCE
 	$(DOCKER_BUILD) --target=opencoarrays-ft --tag=$(SHIFTER_REPO):$(OPENCOARRAYS_TAG) .
+	docker tag $(SHIFTER_REPO):$(OPENCOARRAYS_TAG) $(SHIFTER_REPO):latest
 	
 shifter-login: FORCE
 	docker login registry.services.nersc.gov
 
 shifter-push: FORCE
 	docker push $(SHIFTER_REPO):$(OPENCOARRAYS_TAG)
+	docker push $(SHIFTER_REPO):latest
 
 shifter-push-debug: FORCE
 	docker push $(SHIFTER_REPO):debug-$(OPENCOARRAYS_TAG)
