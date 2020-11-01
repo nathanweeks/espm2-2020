@@ -8189,8 +8189,8 @@ redo:
     chk_err(rc);
     flag = (rc == MPI_SUCCESS);
     dprint("FORM TEAM: before MPIX_Comm_agree (flag == %d\n)\n", flag);
-    ierr = MPIX_Comm_agree(current_comm, &flag);
-    dprint("FORM TEAM: MPIX_Comm_agree(flag = %d) = %d\n", flag, ierr);
+    rc = MPIX_Comm_agree(current_comm, &flag);
+    dprint("FORM TEAM: MPIX_Comm_agree(flag = %d) = %d\n", flag, rc);
     if (MPI_SUCCESS != rc || !flag)
     {
       int result;
