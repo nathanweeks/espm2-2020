@@ -1,3 +1,4 @@
+! NOTE: this example is unsupported by the implementation
 program monte_carlo_pi
   use iso_fortran_env, only : STAT_FAILED_IMAGE
   implicit none

@@ -21,13 +21,15 @@ To pull the existing production container image and execute the three example ap
 ```
 make pull
 make monte_carlo_pi-1
-make monte_carlo_pi-2
+make monte_carlo_pi-2 # NOTE: unsupported by implementation
 make C.6.8
 ```
 
 By default, 8 (Fortran) images (processes) will be used.
 
 To use a different number, override the NPROC macro; e.g., `make NPROC=16 C.6.8`
+
+Note that test/monte_carlo_pi-2.f90 may produce unexpected results, as the underlying ompi osc component does not explicitly support ULFM semantics.
 
 To build a container image from source:
 
@@ -45,7 +47,7 @@ To run the container at NERSC using Shifter:
 make shifter-pull
 make salloc
 make shifter-monte_carlo_pi-1
-make shifter-monte_carlo_pi-2
+make shifter-monte_carlo_pi-2 # NOTE: unupported by implementation
 make shifter-C.6.8
 ```
 
